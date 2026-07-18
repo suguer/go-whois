@@ -1,0 +1,96 @@
+# Go-WHOIS 主配置文件
+# 环境变量可覆盖配置项，格式：WHOIS_大写配置项名
+
+server:
+  # HTTP 服务器配置
+  http:
+    host: "0.0.0.0"
+    port: 8080
+    read_timeout: 30s
+    write_timeout: 30s
+    idle_timeout: 60s
+    shutdown_timeout: 10s
+
+  # CLI 配置
+  cli:
+    default_protocol: "auto"
+    default_output: "json"
+    verbose: false
+
+# 查询引擎配置
+engine:
+  # RDAP 配置
+  rdap:
+    enabled: true
+    timeout: 10s
+    max_retries: 3
+    retry_delay: 1s
+    bootstrap_url: "https://data.iana.org/rdap/dns.json"
+    bootstrap_cache_ttl: 24h
+    user_agent: "go-whois/1.0"
+
+  # WHOIS 配置
+  whois:
+    enabled: true
+    timeout: 10s
+    max_retries: 3
+    retry_delay: 1s
+    default_port: 43
+    user_agent: "go-whois/1.0"
+
+  # 协议优先级配置
+  priority:
+    default: "rdap"
+    # TLD 级别协议配置
+    tld_override:
+      # 某些 TLD 只支持 WHOIS
+      # ".cn": "whois"
+      # ".ru": "whois"
+
+# 缓存配置
+cache:
+  # 内存缓存
+  memory:
+    enabled: true
+    max_size: 10000
+    ttl: 1h
+    cleanup_interval: 10m
+
+  # Redis 缓存（可选）
+  redis:
+    enabled: false
+    host: "localhost"
+    port: 6379
+    password: ""
+    db: 0
+    ttl: 1h
+    max_retries: 3
+
+# 日志配置
+log:
+  level: "info"           # debug, info, warn, error
+  format: "json"          # json, console
+  output: "stdout"        # stdout, stderr, file
+  file_path: "logs/go-whois.log"
+  max_size: 100           # MB
+  max_backups: 3
+  max_age: 7              # days
+  compress: true
+
+# 限流配置
+ratelimit:
+  enabled: true
+  rate: 100               # 每秒请求数
+  burst: 200              # 突发请求数
+  cleanup_interval: 1m
+
+# 监控配置
+metrics:
+  enabled: true
+  path: "/metrics"
+  port: 9090
+
+# 健康检查配置
+health:
+  path: "/health"
+  timeout: 5s
