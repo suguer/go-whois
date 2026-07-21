@@ -93,15 +93,17 @@ type cacheEntry struct {
 
 // options 客户端配置选项
 type options struct {
-	protocol        model.QueryProtocol
-	timeout         time.Duration
-	cacheEnabled    bool
-	cacheMaxSize    int
-	cacheTTL        time.Duration
-	rdapBootstrap   string
-	userAgent       string
-	logger          Logger
-	includeRaw      bool
+	protocol          model.QueryProtocol
+	timeout           time.Duration
+	cacheEnabled      bool
+	cacheMaxSize      int
+	cacheTTL          time.Duration
+	rdapBootstrap     string
+	rdapBootstrapFile string
+	whoisConfigFile   string
+	userAgent         string
+	logger            Logger
+	includeRaw        bool
 }
 
 // Option 定义配置选项函数类型
@@ -134,6 +136,22 @@ func WithCache(enabled bool, maxSize int, ttl time.Duration) Option {
 func WithRDAPBootstrap(url string) Option {
 	return func(o *options) {
 		o.rdapBootstrap = url
+	}
+}
+
+// WithRDAPBootstrapFile 设置本地 RDAP Bootstrap 文件路径
+// 优先从本地文件加载，不再从网络下载
+func WithRDAPBootstrapFile(path string) Option {
+	return func(o *options) {
+		o.rdapBootstrapFile = path
+	}
+}
+
+// WithWHOISConfigFile 设置本地 WHOIS 服务器配置文件路径
+// 指定后将从该文件加载 TLD -> WHOIS 服务器映射
+func WithWHOISConfigFile(path string) Option {
+	return func(o *options) {
+		o.whoisConfigFile = path
 	}
 }
 
@@ -186,10 +204,14 @@ func NewClient(opts ...Option) *Client {
 	}
 
 	// 初始化 WHOIS 客户端
-	c.whoisClient = NewWHOISClient(
+	whoisOpts := []WHOISOption{
 		WithWSTimeout(o.timeout),
 		WithWSLogger(o.logger),
-	)
+	}
+	if o.whoisConfigFile != "" {
+		whoisOpts = append(whoisOpts, WithWSConfigFile(o.whoisConfigFile))
+	}
+	c.whoisClient = NewWHOISClient(whoisOpts...)
 
 	// 异步加载 RDAP Bootstrap
 	go c.loadRDAPBootstrap()

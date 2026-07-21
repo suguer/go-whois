@@ -18,6 +18,12 @@ func main() {
 	// 高级配置用法
 	advancedUsage()
 
+	// 使用本地配置文件
+	localConfigUsage()
+
+	// 下载配置文件到指定路径
+	downloadConfigUsage()
+
 	// 使用 WHOIS 客户端
 	whoisClientUsage()
 
@@ -93,6 +99,72 @@ func advancedUsage() {
 	fmt.Println()
 }
 
+// 使用本地配置文件演示
+func localConfigUsage() {
+	fmt.Println("=== 使用本地配置文件 ===")
+
+	// 使用本地 RDAP Bootstrap 文件
+	client := whois.NewClient(
+		// 指定本地 RDAP Bootstrap JSON 文件路径
+		whois.WithRDAPBootstrapFile("/path/to/rdap_bootstrap.json"),
+		// 指定本地 WHOIS 服务器配置文件路径
+		whois.WithWHOISConfigFile("/path/to/tld_whois_servers.yaml"),
+	)
+	defer client.Close()
+
+	// 查询域名
+	result, err := client.Lookup("example.com")
+	if err != nil {
+		log.Printf("查询失败: %v", err)
+		return
+	}
+
+	fmt.Printf("域名: %s\n", result.DomainName)
+	fmt.Printf("注册商: %s\n", result.RegistrarName)
+	fmt.Println()
+}
+
+// 下载配置文件到指定路径演示
+func downloadConfigUsage() {
+	fmt.Println("=== 下载配置文件到指定路径 ===")
+
+	configDir := "/path/to/config"
+
+	// 下载 RDAP Bootstrap 数据到指定路径
+	fmt.Println("正在下载 RDAP Bootstrap 数据...")
+	err := whois.DownloadRDAPBootstrap(configDir + "/rdap_bootstrap.json")
+	if err != nil {
+		log.Printf("下载 RDAP Bootstrap 失败: %v", err)
+	} else {
+		fmt.Printf("RDAP Bootstrap 已保存到: %s/rdap_bootstrap.json\n", configDir)
+	}
+
+	// 下载 WHOIS 服务器配置到指定路径
+	fmt.Println("正在下载 WHOIS 服务器配置（这可能需要几分钟）...")
+	err = whois.DownloadWHOISConfig(
+		configDir+"/tld_whois_servers.yaml",
+		10, // 并发数
+		func(progress, total int) {
+			fmt.Printf("\r进度: %d/%d", progress, total)
+		},
+	)
+	if err != nil {
+		log.Printf("\n下载 WHOIS 配置失败: %v", err)
+	} else {
+		fmt.Printf("\nWHOIS 配置已保存到: %s/tld_whois_servers.yaml\n", configDir)
+	}
+
+	// 使用下载的配置文件创建客户端
+	client := whois.NewClient(
+		whois.WithRDAPBootstrapFile(configDir+"/rdap_bootstrap.json"),
+		whois.WithWHOISConfigFile(configDir+"/tld_whois_servers.yaml"),
+	)
+	defer client.Close()
+
+	fmt.Println("使用下载的配置文件创建客户端成功")
+	fmt.Println()
+}
+
 // WHOIS 客户端使用演示
 func whoisClientUsage() {
 	fmt.Println("=== WHOIS 客户端用法 ===")
@@ -123,6 +195,12 @@ func whoisClientUsage() {
 	fmt.Printf("名称服务器: %v\n", result.NameServers)
 	fmt.Printf("状态: %v\n", result.Status)
 	fmt.Println()
+
+	// 使用本地配置文件创建 WHOIS 客户端
+	whoisClientFromFile := whois.NewWHOISClient(
+		whois.WithWSConfigFile("/path/to/tld_whois_servers.yaml"),
+	)
+	defer whoisClientFromFile.Close()
 
 	// 获取缓存统计（使用高级客户端）
 	client := whois.NewClient()

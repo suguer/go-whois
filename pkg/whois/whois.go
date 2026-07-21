@@ -28,6 +28,7 @@ type WHOISClient struct {
 	timeout    time.Duration
 	port       int
 	logger     Logger
+	configFile string
 }
 
 // NewWHOISClient 创建新的 WHOIS 客户端
@@ -95,8 +96,25 @@ func WithWSFallbacks(fallbacks map[string][]string) WHOISOption {
 	}
 }
 
+// WithWSConfigFile 设置本地 WHOIS 配置文件路径
+// 指定后将从该文件加载 TLD -> WHOIS 服务器映射
+func WithWSConfigFile(path string) WHOISOption {
+	return func(c *WHOISClient) {
+		c.configFile = path
+	}
+}
+
 // loadDefaultConfig 加载默认配置文件
 func (c *WHOISClient) loadDefaultConfig() {
+	// 如果指定了配置文件，优先加载
+	if c.configFile != "" {
+		if err := c.loadConfigFromFile(c.configFile); err != nil {
+			c.logger.Warn("从指定路径加载配置失败: %v", c.configFile, err)
+		} else {
+			return
+		}
+	}
+
 	configPaths := []string{
 		"config/tld_whois_servers.yaml",
 		"../config/tld_whois_servers.yaml",
@@ -105,30 +123,38 @@ func (c *WHOISClient) loadDefaultConfig() {
 	}
 
 	for _, path := range configPaths {
-		data, err := os.ReadFile(path)
-		if err != nil {
+		if err := c.loadConfigFromFile(path); err != nil {
 			continue
 		}
-
-		var tldConfig TLDServerConfig
-		if err := yaml.Unmarshal(data, &tldConfig); err != nil {
-			c.logger.Warn("解析 TLD 配置文件失败: %v", err)
-			continue
-		}
-
-		// 加载服务器映射
-		for k, v := range tldConfig.Servers {
-			c.servers[k] = v
-		}
-
-		// 加载备用服务器
-		for k, v := range tldConfig.Fallbacks {
-			c.fallbacks[k] = v
-		}
-
-		c.logger.Info("已加载 %d 个 TLD 服务器配置", len(c.servers))
 		break
 	}
+}
+
+// loadConfigFromFile 从指定文件加载配置
+func (c *WHOISClient) loadConfigFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var tldConfig TLDServerConfig
+	if err := yaml.Unmarshal(data, &tldConfig); err != nil {
+		c.logger.Warn("解析 TLD 配置文件失败: %v", err)
+		return err
+	}
+
+	// 加载服务器映射
+	for k, v := range tldConfig.Servers {
+		c.servers[k] = v
+	}
+
+	// 加载备用服务器
+	for k, v := range tldConfig.Fallbacks {
+		c.fallbacks[k] = v
+	}
+
+	c.logger.Info("已加载 %d 个 TLD 服务器配置", len(c.servers))
+	return nil
 }
 
 // Query 执行 WHOIS 查询

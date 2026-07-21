@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -43,8 +44,18 @@ type RDAPResponse struct {
 	} `json:"secureDNS"`
 }
 
-// loadRDAPBootstrap 从 IANA 加载 RDAP Bootstrap 数据
+// loadRDAPBootstrap 加载 RDAP Bootstrap 数据
+// 优先从本地文件加载，其次从 URL 加载
 func (c *Client) loadRDAPBootstrap() {
+	// 如果指定了本地文件，优先从文件加载
+	if c.options.rdapBootstrapFile != "" {
+		if err := c.loadRDAPFromFile(c.options.rdapBootstrapFile); err != nil {
+			c.logger.Warn("从本地文件加载 RDAP Bootstrap 失败", "path", c.options.rdapBootstrapFile, "error", err)
+		} else {
+			return
+		}
+	}
+
 	resp, err := c.httpClient.Get(c.options.rdapBootstrap)
 	if err != nil {
 		c.logger.Warn("加载 IANA RDAP Bootstrap 失败", "error", err)
@@ -114,6 +125,39 @@ func (c *Client) loadDefaultRDAP() {
 
 	c.rdapCache = defaults
 	c.logger.Info("加载默认 RDAP 端点", "count", len(defaults))
+}
+
+// loadRDAPFromFile 从本地文件加载 RDAP Bootstrap 数据
+func (c *Client) loadRDAPFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取 RDAP Bootstrap 文件失败: %w", err)
+	}
+
+	var bootstrapData IANABootstrapData
+	if err := json.Unmarshal(data, &bootstrapData); err != nil {
+		return fmt.Errorf("解析 RDAP Bootstrap JSON 失败: %w", err)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, service := range bootstrapData.Services {
+		if len(service) < 2 || len(service[0]) == 0 || len(service[1]) == 0 {
+			continue
+		}
+		tlds := service[0]
+		endpoint := service[1][0]
+		if !strings.HasSuffix(endpoint, "/") {
+			endpoint += "/"
+		}
+		for _, tld := range tlds {
+			c.rdapCache[tld] = endpoint
+		}
+	}
+
+	c.logger.Info("从本地文件加载 RDAP Bootstrap", "path", path, "count", len(c.rdapCache))
+	return nil
 }
 
 // getRDAPEndpoint 获取 TLD 的 RDAP 端点

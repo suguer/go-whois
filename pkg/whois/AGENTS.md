@@ -14,13 +14,15 @@ Public 3rd-party client API. Self-contained - does NOT depend on `internal/` pac
 
 ## CONVENTIONS
 
-- **Option pattern**: `type Option func(*options)` - `WithProtocol`, `WithTimeout`, `WithCache`, `WithRDAPBootstrap`, `WithUserAgent`, `WithLogger`, `WithRawResponse`
-- **WHOISOption pattern**: Separate `type WHOISOption func(*whoisOptions)` with WS prefix (`WithWSTimeout`, `WithWSPort`, `WithWSServers`, `WithWSFallbacks`, `WithWSLogger`) - avoids name collision with `Option`
+- **Option pattern**: `type Option func(*options)` - `WithProtocol`, `WithTimeout`, `WithCache`, `WithRDAPBootstrap`, `WithRDAPBootstrapFile`, `WithWHOISConfigFile`, `WithUserAgent`, `WithLogger`, `WithRawResponse`
+- **WHOISOption pattern**: Separate `type WHOISOption func(*whoisOptions)` with WS prefix (`WithWSTimeout`, `WithWSPort`, `WithWSServers`, `WithWSFallbacks`, `WithWSLogger`, `WithWSConfigFile`) - avoids name collision with `Option`
 - **Logger interface**: `Debug/Info/Warn/Error(msg string, keysAndValues ...interface{})` - default impl uses stdlib `log` to stderr with `[go-whois] ` prefix, Debug is no-op
 - **Model import**: Uses `go-whois/pkg/model.DomainInfo` (NOT `internal/model.DomainInfo`)
 - **Cache key format**: `string(protocol) + ":" + domain` (matches internal/ convention)
 - **Auto mode**: RDAP first, on error falls back to WHOIS (logs warning)
-- **WHOISClient config loading**: Tries `config/tld_whois_servers.yaml` then `../config/`, `../../config/`, `../../../config/` (relative path fallback chain)
+- **WHOISClient config loading**: If `configFile` is set via `WithWSConfigFile`, loads from that file first; otherwise tries `config/tld_whois_servers.yaml` then `../config/`, `../../config/`, `../../../config/` (relative path fallback chain)
+- **RDAP Bootstrap loading**: If `rdapBootstrapFile` is set via `WithRDAPBootstrapFile`, loads from local file first; falls back to URL fetch on failure
+- **Config download functions**: `DownloadRDAPBootstrap(destPath)` and `DownloadWHOISConfig(destPath, concurrency, progressCallback)` download configs to specified paths
 - **FetchWhoisServers concurrency**: Uses `sync.WaitGroup` + buffered channel semaphore + writes to `&results[idx]` (index-isolated, safe)
 - **Bootstrap fetch**: `FetchRDAPBootstrap` parses IANA `dns.json`; `FetchTLDList`/`FetchWhoisServer` scrape IANA HTML pages via regex
 

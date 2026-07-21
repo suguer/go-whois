@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -278,4 +280,82 @@ func GetWhoisServersMap(tlds []TLDInfo) map[string]string {
 		}
 	}
 	return result
+}
+
+// DownloadRDAPBootstrap 从 IANA 下载 RDAP Bootstrap 数据并保存到本地文件
+// destPath: 目标文件路径 (例如: "/path/to/rdap_bootstrap.json")
+func DownloadRDAPBootstrap(destPath string) error {
+	return DownloadRDAPBootstrapFromURL("https://data.iana.org/rdap/dns.json", destPath)
+}
+
+// DownloadRDAPBootstrapFromURL 从指定 URL 下载 RDAP Bootstrap 数据并保存到本地文件
+// url: 下载地址
+// destPath: 目标文件路径
+func DownloadRDAPBootstrapFromURL(url, destPath string) error {
+	// 确保目标目录存在
+	dir := filepath.Dir(destPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+
+	// 下载文件
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("下载 RDAP Bootstrap 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("下载 RDAP Bootstrap 返回错误状态码: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取 RDAP Bootstrap 响应失败: %w", err)
+	}
+
+	// 验证 JSON 格式
+	var data IANABootstrapData
+	if err := json.Unmarshal(body, &data); err != nil {
+		return fmt.Errorf("验证 RDAP Bootstrap JSON 失败: %w", err)
+	}
+
+	// 写入文件
+	if err := os.WriteFile(destPath, body, 0644); err != nil {
+		return fmt.Errorf("写入 RDAP Bootstrap 文件失败: %w", err)
+	}
+
+	return nil
+}
+
+// DownloadWHOISConfig 从 IANA 获取 TLD 的 WHOIS 服务器信息并保存到本地 YAML 文件
+// destPath: 目标文件路径 (例如: "/path/to/tld_whois_servers.yaml")
+// concurrency: 并发请求数 (建议 10-20)
+// progressCallback: 进度回调函数 (可选)
+func DownloadWHOISConfig(destPath string, concurrency int, progressCallback func(progress, total int)) error {
+	// 确保目标目录存在
+	dir := filepath.Dir(destPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %w", err)
+	}
+
+	// 获取 TLD 列表
+	tlds, err := FetchTLDList()
+	if err != nil {
+		return fmt.Errorf("获取 TLD 列表失败: %w", err)
+	}
+
+	// 并发获取 WHOIS 服务器信息
+	results := FetchWhoisServers(tlds, concurrency, progressCallback)
+
+	// 格式化为 YAML
+	yamlContent := FormatWhoisServersYAML(results)
+
+	// 写入文件
+	if err := os.WriteFile(destPath, []byte(yamlContent), 0644); err != nil {
+		return fmt.Errorf("写入 WHOIS 配置文件失败: %w", err)
+	}
+
+	return nil
 }
