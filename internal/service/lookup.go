@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"go-whois/internal/cache"
-	"go-whois/internal/config"
-	"go-whois/internal/engine"
-	"go-whois/internal/model"
-	"go-whois/pkg/validator"
+	"github.com/suguer/go-whois/internal/cache"
+	"github.com/suguer/go-whois/internal/config"
+	"github.com/suguer/go-whois/internal/engine"
+	"github.com/suguer/go-whois/internal/model"
+	"github.com/suguer/go-whois/pkg/validator"
 )
 
 // LookupService 定义查询服务接口

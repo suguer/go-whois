@@ -7,8 +7,8 @@ import (
 	"log"
 	"time"
 
-	"go-whois/pkg/model"
-	"go-whois/pkg/whois"
+	"github.com/suguer/go-whois/pkg/model"
+	"github.com/suguer/go-whois/pkg/whois"
 )
 
 func main() {

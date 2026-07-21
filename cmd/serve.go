@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go-whois/internal/api"
-	"go-whois/internal/cache"
-	"go-whois/internal/config"
-	"go-whois/internal/engine"
-	"go-whois/internal/service"
+	"github.com/suguer/go-whois/internal/api"
+	"github.com/suguer/go-whois/internal/cache"
+	"github.com/suguer/go-whois/internal/config"
+	"github.com/suguer/go-whois/internal/engine"
+	"github.com/suguer/go-whois/internal/service"
 
 	"github.com/spf13/cobra"
 )

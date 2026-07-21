@@ -3,11 +3,11 @@ package api
 import (
 	"net/http"
 
-	"go-whois/internal/engine"
-	"go-whois/internal/errors"
-	"go-whois/internal/model"
-	"go-whois/internal/service"
-	"go-whois/pkg/validator"
+	"github.com/suguer/go-whois/internal/engine"
+	"github.com/suguer/go-whois/internal/errors"
+	"github.com/suguer/go-whois/internal/model"
+	"github.com/suguer/go-whois/internal/service"
+	"github.com/suguer/go-whois/pkg/validator"
 
 	"github.com/gin-gonic/gin"
 )

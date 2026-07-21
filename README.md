@@ -40,7 +40,7 @@ go build -o bin/go-whois.exe .
 ### 作为第三方库引入
 
 ```bash
-go get go-whois
+go get github.com/suguer/go-whois
 ```
 
 ### 使用 Makefile
@@ -335,7 +335,7 @@ import (
     "fmt"
     "log"
 
-    "go-whois/pkg/whois"
+    "github.com/suguer/go-whois/pkg/whois"
 )
 
 func main() {
@@ -361,8 +361,8 @@ func main() {
 ```go
 import (
     "time"
-    "go-whois/pkg/model"
-    "go-whois/pkg/whois"
+    "github.com/suguer/go-whois/pkg/model"
+    "github.com/suguer/go-whois/pkg/whois"
 )
 
 client := whois.NewClient(

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"go-whois/pkg/model"
-	"go-whois/pkg/validator"
+	"github.com/suguer/go-whois/pkg/model"
+	"github.com/suguer/go-whois/pkg/validator"
 
 	"gopkg.in/yaml.v3"
 )

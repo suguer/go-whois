@@ -2,7 +2,7 @@ package engine
 
 import (
 	"context"
-	"go-whois/internal/model"
+	"github.com/suguer/go-whois/internal/model"
 )
 
 // Protocol 表示查询协议类型

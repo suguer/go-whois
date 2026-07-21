@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"go-whois/internal/model"
+	"github.com/suguer/go-whois/internal/model"
 )
 
 // DefaultNormalizer 表示结果标准化器

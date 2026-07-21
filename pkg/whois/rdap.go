@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"go-whois/pkg/model"
+	"github.com/suguer/go-whois/pkg/model"
 )
 
 // IANABootstrapData 表示 IANA RDAP Bootstrap JSON 结构

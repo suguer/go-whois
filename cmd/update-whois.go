@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"go-whois/pkg/whois"
+	"github.com/suguer/go-whois/pkg/whois"
 
 	"github.com/spf13/cobra"
 )

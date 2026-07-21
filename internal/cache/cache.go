@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"go-whois/internal/model"
+	"github.com/suguer/go-whois/internal/model"
 )
 
 // CacheManager 定义缓存管理接口

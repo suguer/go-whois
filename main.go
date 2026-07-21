@@ -1,7 +1,7 @@
 package main
 
 import (
-	"go-whois/cmd"
+	"github.com/suguer/go-whois/cmd"
 )
 
 func main() {

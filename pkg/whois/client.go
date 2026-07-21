@@ -35,7 +35,7 @@ import (
 	"sync"
 	"time"
 
-	"go-whois/pkg/model"
+	"github.com/suguer/go-whois/pkg/model"
 )
 
 // Logger 定义日志接口，允许用户自定义日志实现
