@@ -67,7 +67,7 @@ func advancedUsage() {
 		// 设置查询协议为 RDAP
 		whois.WithProtocol(model.ProtocolRDAP),
 		// 设置超时时间
-		whois.WithTimeout(15 * time.Second),
+		whois.WithTimeout(15*time.Second),
 		// 启用缓存
 		whois.WithCache(true, 500, 30*time.Minute),
 		// 设置自定义 RDAP Bootstrap URL
@@ -106,9 +106,9 @@ func localConfigUsage() {
 	// 使用本地 RDAP Bootstrap 文件
 	client := whois.NewClient(
 		// 指定本地 RDAP Bootstrap JSON 文件路径
-		whois.WithRDAPBootstrapFile("/path/to/rdap_bootstrap.json"),
+		whois.WithRDAPBootstrapFile("config/rdap_bootstrap.json"),
 		// 指定本地 WHOIS 服务器配置文件路径
-		whois.WithWHOISConfigFile("/path/to/tld_whois_servers.yaml"),
+		whois.WithWHOISConfigFile("config/tld_whois_servers.yaml"),
 	)
 	defer client.Close()
 
@@ -128,7 +128,7 @@ func localConfigUsage() {
 func downloadConfigUsage() {
 	fmt.Println("=== 下载配置文件到指定路径 ===")
 
-	configDir := "/path/to/config"
+	configDir := "config"
 
 	// 下载 RDAP Bootstrap 数据到指定路径
 	fmt.Println("正在下载 RDAP Bootstrap 数据...")
@@ -171,7 +171,7 @@ func whoisClientUsage() {
 
 	// 创建单独的 WHOIS 客户端
 	whoisClient := whois.NewWHOISClient(
-		whois.WithWSTimeout(10 * time.Second),
+		whois.WithWSTimeout(10*time.Second),
 		whois.WithWSPort(43),
 		whois.WithWSServers(map[string]string{
 			".com": "whois.verisign-grs.com",
@@ -215,7 +215,7 @@ func rdapBootstrapUsage() {
 	fmt.Println("=== RDAP Bootstrap 用法 ===")
 
 	// 从 IANA 获取 RDAP Bootstrap 数据
-	rdapEndpoints, err := whois.FetchRDAPBootstrap("https://data.iana.org/rdap/dns.json")
+	rdapEndpoints, err := whois.DownloadRDAPConfig("https://data.iana.org/rdap/dns.json")
 	if err != nil {
 		log.Printf("获取 RDAP Bootstrap 失败: %v", err)
 		return

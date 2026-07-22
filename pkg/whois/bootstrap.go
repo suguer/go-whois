@@ -20,9 +20,9 @@ type TLDInfo struct {
 	WhoisServer string `json:"whois_server,omitempty"`
 }
 
-// FetchRDAPBootstrap 从 IANA 获取 RDAP Bootstrap 数据
+// DownloadRDAPConfig 从 IANA 获取 RDAP Bootstrap 数据
 // 返回 TLD 到 RDAP 端点的映射
-func FetchRDAPBootstrap(bootstrapURL string) (map[string]string, error) {
+func DownloadRDAPConfig(bootstrapURL string) (map[string]string, error) {
 	if bootstrapURL == "" {
 		bootstrapURL = "https://data.iana.org/rdap/dns.json"
 	}
@@ -38,7 +38,7 @@ func FetchRDAPBootstrap(bootstrapURL string) (map[string]string, error) {
 		return nil, fmt.Errorf("RDAP Bootstrap 返回错误状态码: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 限制 10MB
 	if err != nil {
 		return nil, fmt.Errorf("读取 RDAP Bootstrap 响应失败: %w", err)
 	}
@@ -79,7 +79,7 @@ func FetchTLDList() ([]TLDInfo, error) {
 		return nil, fmt.Errorf("HTTP 状态码: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 限制 10MB
 	if err != nil {
 		return nil, fmt.Errorf("读取 TLD 列表响应失败: %w", err)
 	}
@@ -183,7 +183,7 @@ func FetchWhoisServer(tld string) string {
 		return ""
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 限制 1MB
 	if err != nil {
 		return ""
 	}
@@ -283,7 +283,7 @@ func GetWhoisServersMap(tlds []TLDInfo) map[string]string {
 }
 
 // DownloadRDAPBootstrap 从 IANA 下载 RDAP Bootstrap 数据并保存到本地文件
-// destPath: 目标文件路径 (例如: "/path/to/rdap_bootstrap.json")
+// destPath: 目标文件路径 (例如: "config/rdap_bootstrap.json")
 func DownloadRDAPBootstrap(destPath string) error {
 	return DownloadRDAPBootstrapFromURL("https://data.iana.org/rdap/dns.json", destPath)
 }
@@ -310,7 +310,7 @@ func DownloadRDAPBootstrapFromURL(url, destPath string) error {
 		return fmt.Errorf("下载 RDAP Bootstrap 返回错误状态码: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 限制 10MB
 	if err != nil {
 		return fmt.Errorf("读取 RDAP Bootstrap 响应失败: %w", err)
 	}
@@ -330,7 +330,7 @@ func DownloadRDAPBootstrapFromURL(url, destPath string) error {
 }
 
 // DownloadWHOISConfig 从 IANA 获取 TLD 的 WHOIS 服务器信息并保存到本地 YAML 文件
-// destPath: 目标文件路径 (例如: "/path/to/tld_whois_servers.yaml")
+// destPath: 目标文件路径 (例如: "config/tld_whois_servers.yaml")
 // concurrency: 并发请求数 (建议 10-20)
 // progressCallback: 进度回调函数 (可选)
 func DownloadWHOISConfig(destPath string, concurrency int, progressCallback func(progress, total int)) error {

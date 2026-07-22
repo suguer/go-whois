@@ -47,6 +47,10 @@ type RDAPResponse struct {
 // loadRDAPBootstrap 加载 RDAP Bootstrap 数据
 // 优先从本地文件加载，其次从 URL 加载
 func (c *Client) loadRDAPBootstrap() {
+	defer c.readyOnce.Do(func() {
+		close(c.readyCh)
+	})
+
 	// 如果指定了本地文件，优先从文件加载
 	if c.options.rdapBootstrapFile != "" {
 		if err := c.loadRDAPFromFile(c.options.rdapBootstrapFile); err != nil {
@@ -210,9 +214,16 @@ func (c *Client) queryRDAP(ctx context.Context, domain string) (*model.DomainInf
 	startTime := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		// 区分超时和其他网络错误
+		code := model.ErrCodeProtocolError
+		message := "RDAP 查询失败"
+		if ctx.Err() == context.DeadlineExceeded {
+			code = model.ErrCodeQueryTimeout
+			message = "RDAP 查询超时"
+		}
 		return nil, &model.Error{
-			Code:    model.ErrCodeQueryTimeout,
-			Message: "RDAP 查询超时",
+			Code:    code,
+			Message: message,
 			Details: err.Error(),
 		}
 	}
@@ -234,8 +245,8 @@ func (c *Client) queryRDAP(ctx context.Context, domain string) (*model.DomainInf
 		}
 	}
 
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
+	// 读取响应（限制 10MB）
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, &model.Error{
 			Code:    model.ErrCodeInternalError,
@@ -386,35 +397,36 @@ func parseRegistrantVCard(vcard []interface{}) string {
 	return ""
 }
 
+// statusMap 域名状态规范化映射表
+var statusMap = map[string]string{
+	"clientdeleteprohibited":   "clientDeleteProhibited",
+	"clienthold":               "clientHold",
+	"clientrenewprohibited":    "clientRenewProhibited",
+	"clienttransferprohibited": "clientTransferProhibited",
+	"clientupdateprohibited":   "clientUpdateProhibited",
+	"serverdeleteprohibited":   "serverDeleteProhibited",
+	"serverhold":               "serverHold",
+	"serverrenewprohibited":    "serverRenewProhibited",
+	"servertransferprohibited": "serverTransferProhibited",
+	"serverupdateprohibited":   "serverUpdateProhibited",
+	"ok":                       "ok",
+	"active":                   "active",
+	"inactive":                 "inactive",
+	"locked":                   "locked",
+	"pendingcreate":            "pendingCreate",
+	"pendingdelete":            "pendingDelete",
+	"pendingrenew":             "pendingRenew",
+	"pendingtransfer":          "pendingTransfer",
+	"pendingupdate":            "pendingUpdate",
+	"redemptionperiod":         "redemptionPeriod",
+	"renewperiod":              "renewPeriod",
+	"transferperiod":           "transferPeriod",
+	"addperiod":                "addPeriod",
+	"autorenewperiod":          "autoRenewPeriod",
+}
+
 // normalizeStatus 规范化域名状态
 func normalizeStatus(status string) string {
-	statusMap := map[string]string{
-		"clientdeleteprohibited":   "clientDeleteProhibited",
-		"clienthold":               "clientHold",
-		"clientrenewprohibited":    "clientRenewProhibited",
-		"clienttransferprohibited": "clientTransferProhibited",
-		"clientupdateprohibited":   "clientUpdateProhibited",
-		"serverdeleteprohibited":   "serverDeleteProhibited",
-		"serverhold":               "serverHold",
-		"serverrenewprohibited":    "serverRenewProhibited",
-		"servertransferprohibited": "serverTransferProhibited",
-		"serverupdateprohibited":   "serverUpdateProhibited",
-		"ok":                       "ok",
-		"active":                   "active",
-		"inactive":                 "inactive",
-		"locked":                   "locked",
-		"pendingcreate":            "pendingCreate",
-		"pendingdelete":            "pendingDelete",
-		"pendingrenew":             "pendingRenew",
-		"pendingtransfer":          "pendingTransfer",
-		"pendingupdate":            "pendingUpdate",
-		"redemptionperiod":         "redemptionPeriod",
-		"renewperiod":              "renewPeriod",
-		"transferperiod":           "transferPeriod",
-		"addperiod":                "addPeriod",
-		"autorenewperiod":          "autoRenewPeriod",
-	}
-
 	lower := strings.ToLower(status)
 	if normalized, ok := statusMap[lower]; ok {
 		return normalized

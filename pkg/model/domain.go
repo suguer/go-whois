@@ -112,13 +112,14 @@ func (e *Error) Error() string {
 
 // 错误代码常量
 const (
-	ErrCodeInvalidDomain     = "INVALID_DOMAIN"
-	ErrCodeDomainNotFound    = "DOMAIN_NOT_FOUND"
-	ErrCodeQueryTimeout      = "QUERY_TIMEOUT"
-	ErrCodeProtocolError     = "PROTOCOL_ERROR"
-	ErrCodeRateLimited       = "RATE_LIMITED"
-	ErrCodeInternalError     = "INTERNAL_ERROR"
-	ErrCodeServiceUnavailable = "SERVICE_UNAVAILABLE"
+	ErrCodeInvalidDomain       = "INVALID_DOMAIN"
+	ErrCodeDomainNotFound      = "DOMAIN_NOT_FOUND"
+	ErrCodeQueryTimeout        = "QUERY_TIMEOUT"
+	ErrCodeProtocolError       = "PROTOCOL_ERROR"
+	ErrCodeRateLimited         = "RATE_LIMITED"
+	ErrCodeInternalError       = "INTERNAL_ERROR"
+	ErrCodeServiceUnavailable  = "SERVICE_UNAVAILABLE"
+	ErrCodeUnsupportedProtocol = "UNSUPPORTED_PROTOCOL"
 )
 
 // HealthResponse 健康检查响应

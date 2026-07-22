@@ -268,8 +268,7 @@ go-whois/
 │   └── usage.go              # 第三方库使用示例
 ├── config/                   # 配置文件
 │   ├── config.yaml           # 主配置
-│   └── tld_whois_servers.yaml # TLD WHOIS 服务器映射
-├── data/                     # 数据文件
+│   ├── tld_whois_servers.yaml # TLD WHOIS 服务器映射
 │   └── rdap_bootstrap.json   # RDAP Bootstrap 数据
 ├── main.go                   # 入口文件
 ├── Makefile                  # 构建脚本
@@ -304,17 +303,27 @@ pkg/
 | `Client.Lookup(domain string) (*DomainInfo, error)` | 查询域名信息（默认 RDAP 优先） |
 | `Client.LookupWithContext(ctx context.Context, domain string) (*DomainInfo, error)` | 带上下文的域名查询 |
 | `Client.LookupWithProtocol(domain string, protocol QueryProtocol) (*DomainInfo, error)` | 使用指定协议查询 |
+| `Client.BatchLookup(ctx context.Context, domains []string, maxConcurrency int) []BatchResult` | 批量查询域名信息 |
+| `Client.WaitForReady(ctx context.Context) error` | 等待客户端就绪（RDAP Bootstrap 加载完成） |
 | `Client.GetCacheStats() CacheStats` | 获取缓存统计信息 |
 | `Client.ClearCache()` | 清空缓存 |
 | `Client.Close() error` | 关闭客户端，清理资源 |
 | `NewWHOISClient(opts ...WHOISOption) *WHOISClient` | 创建单独的 WHOIS 客户端 |
 | `WHOISClient.Query(ctx context.Context, domain string) (*DomainInfo, error)` | 执行 WHOIS 查询 |
 
+#### 配置文件下载
+
+| 函数 | 说明 |
+|------|------|
+| `DownloadRDAPBootstrap(destPath string) error` | 从 IANA 下载 RDAP Bootstrap 数据到指定路径 |
+| `DownloadRDAPBootstrapFromURL(url, destPath string) error` | 从指定 URL 下载 RDAP Bootstrap 数据 |
+| `DownloadWHOISConfig(destPath string, concurrency int, progressCallback func(int, int)) error` | 从 IANA 获取并保存 WHOIS 服务器配置 |
+
 #### RDAP Bootstrap 获取
 
 | 函数 | 说明 |
 |------|------|
-| `FetchRDAPBootstrap(bootstrapURL string) (map[string]string, error)` | 从 IANA 获取 RDAP Bootstrap 数据，返回 TLD 到端点的映射 |
+| `DownloadRDAPConfig(bootstrapURL string) (map[string]string, error)` | 从 IANA 获取 RDAP Bootstrap 数据，返回 TLD 到端点的映射 |
 
 #### WHOIS 服务器信息获取
 
@@ -370,9 +379,12 @@ client := whois.NewClient(
     whois.WithTimeout(15 * time.Second),          // 设置超时时间
     whois.WithCache(true, 1000, time.Hour),       // 启用缓存 (enabled, maxSize, ttl)
     whois.WithRDAPBootstrap("https://custom-url"), // 自定义 RDAP Bootstrap URL
+    whois.WithRDAPBootstrapFile("/path/to/rdap.json"), // 使用本地 RDAP Bootstrap 文件
+    whois.WithWHOISConfigFile("/path/to/whois.yaml"),  // 使用本地 WHOIS 配置文件
     whois.WithUserAgent("my-app/1.0"),            // 设置 User-Agent
     whois.WithRawResponse(true),                  // 包含原始响应
     whois.WithLogger(&MyLogger{}),                // 设置自定义日志器
+    whois.WithHTTPClient(customHTTPClient),       // 自定义 HTTP 客户端
 )
 defer client.Close()
 ```
@@ -385,9 +397,12 @@ defer client.Close()
 | `WithTimeout(timeout time.Duration)` | 设置查询超时时间 | `10s` |
 | `WithCache(enabled bool, maxSize int, ttl time.Duration)` | 启用并配置缓存 | `true, 1000, 1h` |
 | `WithRDAPBootstrap(url string)` | 设置 RDAP Bootstrap URL | IANA 官方 URL |
+| `WithRDAPBootstrapFile(path string)` | 使用本地 RDAP Bootstrap 文件（优先于 URL） | - |
+| `WithWHOISConfigFile(path string)` | 使用本地 WHOIS 服务器配置文件 | - |
 | `WithUserAgent(ua string)` | 设置 User-Agent | `go-whois/1.0` |
 | `WithRawResponse(include bool)` | 是否包含原始响应 | `false` |
 | `WithLogger(logger Logger)` | 设置自定义日志器 | 标准库 log |
+| `WithHTTPClient(client *http.Client)` | 自定义 HTTP 客户端（可配置代理、TLS 等） | 默认客户端 |
 
 ### 单独使用 WHOIS 客户端
 
@@ -419,6 +434,7 @@ if err != nil {
 | `WithWSServers(servers map[string]string)` | 设置 TLD 服务器映射 | 从配置文件加载 |
 | `WithWSFallbacks(fallbacks map[string][]string)` | 设置备用服务器映射 | - |
 | `WithWSLogger(logger Logger)` | 设置自定义日志器 | 标准库 log |
+| `WithWSConfigFile(path string)` | 使用本地 WHOIS 配置文件 | 内嵌默认配置 |
 
 ### 错误处理
 
@@ -451,9 +467,101 @@ if err != nil {
 | `DOMAIN_NOT_FOUND` | 域名未注册 |
 | `QUERY_TIMEOUT` | 查询超时 |
 | `PROTOCOL_ERROR` | 协议错误 |
+| `UNSUPPORTED_PROTOCOL` | 不支持的协议 |
 | `RATE_LIMITED` | 请求频率超限 |
 | `INTERNAL_ERROR` | 内部错误 |
 | `SERVICE_UNAVAILABLE` | 服务不可用 |
+
+### 使用本地配置文件
+
+当作为第三方库使用时，可以指定本地配置文件路径，避免依赖外部网络或相对路径：
+
+```go
+// 方式1: 使用本地配置文件
+client := whois.NewClient(
+    whois.WithRDAPBootstrapFile("config/rdap_bootstrap.json"),
+    whois.WithWHOISConfigFile("config/tld_whois_servers.yaml"),
+)
+defer client.Close()
+
+// 方式2: 等待客户端就绪（确保 RDAP Bootstrap 加载完成）
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+if err := client.WaitForReady(ctx); err != nil {
+    log.Printf("客户端就绪超时: %v", err)
+}
+```
+
+### 下载配置文件到指定路径
+
+可以使用提供的下载函数将配置文件保存到指定位置：
+
+```go
+// 下载 RDAP Bootstrap 数据
+err := whois.DownloadRDAPBootstrap("config/rdap_bootstrap.json")
+if err != nil {
+    log.Fatal(err)
+}
+
+// 下载 WHOIS 服务器配置（耗时较长，建议设置进度回调）
+err = whois.DownloadWHOISConfig(
+    "config/tld_whois_servers.yaml",
+    10, // 并发数
+    func(progress, total int) {
+        fmt.Printf("\r进度: %d/%d", progress, total)
+    },
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### 批量查询
+
+```go
+client := whois.NewClient()
+defer client.Close()
+
+domains := []string{
+    "example.com",
+    "google.com",
+    "github.com",
+    "golang.org",
+}
+
+// 批量查询，最大并发数为 5
+results := client.BatchLookup(context.Background(), domains, 5)
+
+for _, r := range results {
+    if r.Error != nil {
+        fmt.Printf("%s: 查询失败 - %v\n", r.Domain, r.Error)
+    } else {
+        fmt.Printf("%s: 注册商=%s, 到期=%v\n", r.Domain, r.Result.RegistrarName, r.Result.ExpirationDate)
+    }
+}
+```
+
+### 自定义 HTTP 客户端
+
+```go
+// 配置代理或自定义 TLS
+httpClient := &http.Client{
+    Timeout: 30 * time.Second,
+    Transport: &http.Transport{
+        Proxy: http.ProxyURL(proxyURL),
+        TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: false,
+        },
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 10,
+    },
+}
+
+client := whois.NewClient(
+    whois.WithHTTPClient(httpClient),
+)
+defer client.Close()
+```
 
 ### 自定义日志
 
@@ -485,7 +593,7 @@ client := whois.NewClient(
 
 ```go
 // 从 IANA 获取 RDAP Bootstrap 数据
-rdapEndpoints, err := whois.FetchRDAPBootstrap("https://data.iana.org/rdap/dns.json")
+rdapEndpoints, err := whois.DownloadRDAPConfig("https://data.iana.org/rdap/dns.json")
 if err != nil {
     log.Fatal(err)
 }

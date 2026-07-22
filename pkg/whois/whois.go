@@ -109,12 +109,13 @@ func (c *WHOISClient) loadDefaultConfig() {
 	// 如果指定了配置文件，优先加载
 	if c.configFile != "" {
 		if err := c.loadConfigFromFile(c.configFile); err != nil {
-			c.logger.Warn("从指定路径加载配置失败: %v", c.configFile, err)
+			c.logger.Warn("从指定路径加载配置失败", "path", c.configFile, "error", err)
 		} else {
 			return
 		}
 	}
 
+	// 尝试从相对路径加载
 	configPaths := []string{
 		"config/tld_whois_servers.yaml",
 		"../config/tld_whois_servers.yaml",
@@ -126,8 +127,11 @@ func (c *WHOISClient) loadDefaultConfig() {
 		if err := c.loadConfigFromFile(path); err != nil {
 			continue
 		}
-		break
+		return
 	}
+
+	// 最后使用内嵌的默认配置
+	c.loadConfigFromBytes(defaultWHOISConfig)
 }
 
 // loadConfigFromFile 从指定文件加载配置
@@ -137,9 +141,14 @@ func (c *WHOISClient) loadConfigFromFile(path string) error {
 		return err
 	}
 
+	return c.loadConfigFromBytes(data)
+}
+
+// loadConfigFromBytes 从字节数据加载配置
+func (c *WHOISClient) loadConfigFromBytes(data []byte) error {
 	var tldConfig TLDServerConfig
 	if err := yaml.Unmarshal(data, &tldConfig); err != nil {
-		c.logger.Warn("解析 TLD 配置文件失败: %v", err)
+		c.logger.Warn("解析 TLD 配置失败", "error", err)
 		return err
 	}
 
@@ -153,7 +162,7 @@ func (c *WHOISClient) loadConfigFromFile(path string) error {
 		c.fallbacks[k] = v
 	}
 
-	c.logger.Info("已加载 %d 个 TLD 服务器配置", len(c.servers))
+	c.logger.Info("已加载 TLD 服务器配置", "count", len(c.servers))
 	return nil
 }
 
@@ -161,7 +170,11 @@ func (c *WHOISClient) loadConfigFromFile(path string) error {
 func (c *WHOISClient) Query(ctx context.Context, domain string) (*model.DomainInfo, error) {
 	// 验证域名
 	if err := validator.ValidateDomain(domain); err != nil {
-		return nil, fmt.Errorf("域名验证失败: %w", err)
+		return nil, &model.Error{
+			Code:    model.ErrCodeInvalidDomain,
+			Message: "域名验证失败",
+			Details: err.Error(),
+		}
 	}
 
 	// 规范化域名
@@ -170,7 +183,10 @@ func (c *WHOISClient) Query(ctx context.Context, domain string) (*model.DomainIn
 	// 获取 WHOIS 服务器
 	server := c.getServer(domain)
 	if server == "" {
-		return nil, fmt.Errorf("未找到域名 %s 的 WHOIS 服务器", domain)
+		return nil, &model.Error{
+			Code:    model.ErrCodeProtocolError,
+			Message: fmt.Sprintf("未找到域名 %s 的 WHOIS 服务器", domain),
+		}
 	}
 
 	// 执行查询
@@ -186,7 +202,11 @@ func (c *WHOISClient) Query(ctx context.Context, domain string) (*model.DomainIn
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("WHOIS 查询失败: %w", err)
+			return nil, &model.Error{
+				Code:    model.ErrCodeQueryTimeout,
+				Message: "WHOIS 查询失败",
+				Details: err.Error(),
+			}
 		}
 	}
 
@@ -260,6 +280,8 @@ func (c *WHOISClient) queryServer(ctx context.Context, server, domain string) (s
 	// 读取响应
 	var response strings.Builder
 	scanner := bufio.NewScanner(conn)
+	// 设置更大的缓冲区以处理大型 WHOIS 响应
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB
 	for scanner.Scan() {
 		line := scanner.Text()
 		response.WriteString(line + "\n")
@@ -275,7 +297,7 @@ func (c *WHOISClient) queryServer(ctx context.Context, server, domain string) (s
 // parseResponse 解析 WHOIS 响应（简化版本）
 func (c *WHOISClient) parseResponse(result *model.DomainInfo, rawResponse string) error {
 	lines := strings.Split(rawResponse, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "%") || strings.HasPrefix(line, "#") {

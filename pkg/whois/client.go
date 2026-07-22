@@ -27,15 +27,14 @@ package whois
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/suguer/go-whois/pkg/model"
+	"github.com/suguer/go-whois/pkg/validator"
 )
 
 // Logger 定义日志接口，允许用户自定义日志实现
@@ -83,6 +82,9 @@ type Client struct {
 	whoisClient *WHOISClient      // WHOIS 查询客户端
 	resultCache map[string]*cacheEntry
 	logger      Logger
+	readyCh     chan struct{} // RDAP Bootstrap 加载完成信号
+	readyOnce   sync.Once
+	closed      bool
 }
 
 // cacheEntry 缓存条目
@@ -104,6 +106,7 @@ type options struct {
 	userAgent         string
 	logger            Logger
 	includeRaw        bool
+	httpClient        *http.Client
 }
 
 // Option 定义配置选项函数类型
@@ -176,6 +179,14 @@ func WithRawResponse(include bool) Option {
 	}
 }
 
+// WithHTTPClient 设置自定义 HTTP 客户端
+// 可用于配置代理、TLS、连接池等
+func WithHTTPClient(client *http.Client) Option {
+	return func(o *options) {
+		o.httpClient = client
+	}
+}
+
 // NewClient 创建新的客户端实例
 func NewClient(opts ...Option) *Client {
 	o := &options{
@@ -194,13 +205,20 @@ func NewClient(opts ...Option) *Client {
 		opt(o)
 	}
 
+	// 创建 HTTP 客户端
+	httpClient := o.httpClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: o.timeout}
+	}
+
 	c := &Client{
 		options:     o,
-		httpClient:  &http.Client{Timeout: o.timeout},
+		httpClient:  httpClient,
 		rdapCache:   make(map[string]string),
 		whoisCache:  make(map[string]string),
 		resultCache: make(map[string]*cacheEntry),
 		logger:      o.logger,
+		readyCh:     make(chan struct{}),
 	}
 
 	// 初始化 WHOIS 客户端
@@ -233,6 +251,57 @@ func (c *Client) LookupWithContext(ctx context.Context, domain string) (*model.D
 // LookupWithProtocol 使用指定协议查询域名信息
 func (c *Client) LookupWithProtocol(domain string, protocol model.QueryProtocol) (*model.DomainInfo, error) {
 	return c.lookupWithProtocol(context.Background(), domain, protocol)
+}
+
+// WaitForReady 等待客户端就绪（RDAP Bootstrap 加载完成）
+// 在首次查询前调用可确保 RDAP 端点已加载，避免降级到 WHOIS
+func (c *Client) WaitForReady(ctx context.Context) error {
+	select {
+	case <-c.readyCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// BatchResult 表示批量查询的单个结果
+type BatchResult struct {
+	Domain string
+	Result *model.DomainInfo
+	Error  error
+}
+
+// BatchLookup 批量查询域名信息
+// maxConcurrency: 最大并发数 (建议 5-10)
+// 返回结果顺序与输入域名顺序一致
+func (c *Client) BatchLookup(ctx context.Context, domains []string, maxConcurrency int) []BatchResult {
+	if maxConcurrency <= 0 {
+		maxConcurrency = 5
+	}
+
+	results := make([]BatchResult, len(domains))
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	for i, domain := range domains {
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(idx int, d string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result, err := c.LookupWithContext(ctx, d)
+			results[idx] = BatchResult{
+				Domain: d,
+				Result: result,
+				Error:  err,
+			}
+		}(i, domain)
+	}
+
+	wg.Wait()
+	return results
 }
 
 // lookupWithProtocol 内部查询实现
@@ -276,7 +345,7 @@ func (c *Client) lookupWithProtocol(ctx context.Context, domain string, protocol
 		}
 	default:
 		return nil, &model.Error{
-			Code:    model.ErrCodeInvalidDomain,
+			Code:    model.ErrCodeUnsupportedProtocol,
 			Message: "不支持的协议",
 			Details: string(protocol),
 		}
@@ -399,27 +468,35 @@ func (c *Client) queryWHOIS(ctx context.Context, domain string) (*model.DomainIn
 
 // validateDomain 验证域名格式
 func validateDomain(domain string) error {
-	if len(domain) == 0 {
-		return fmt.Errorf("域名不能为空")
-	}
-	if len(domain) > 253 {
-		return fmt.Errorf("域名长度超过253字符")
-	}
-	return nil
+	return validator.ValidateDomain(domain)
 }
 
 // normalizeDomain 规范化域名
 func normalizeDomain(domain string) string {
-	// 转换为小写
-	domain = strings.ToLower(domain)
-	// 去除末尾的点
-	domain = strings.TrimSuffix(domain, ".")
-	return domain
+	return validator.NormalizeDomain(domain)
 }
 
 // Close 清理客户端资源
 func (c *Client) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil
+	}
+	c.closed = true
+
 	// 清空缓存
-	c.ClearCache()
+	c.resultCache = make(map[string]*cacheEntry)
+
+	// 关闭 HTTP 连接
+	c.httpClient.CloseIdleConnections()
+
+	// 关闭 WHOIS 客户端
+	if c.whoisClient != nil {
+		c.whoisClient.Close()
+	}
+
+	c.logger.Info("客户端已关闭")
 	return nil
 }

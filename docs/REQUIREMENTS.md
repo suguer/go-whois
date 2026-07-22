@@ -547,8 +547,7 @@ go-whois/
 │   └── tld/                      # TLD工具
 ├── config/                       # 配置文件
 │   ├── config.yaml               # 主配置文件
-│   └── tld_whois_servers.yaml    # TLD WHOIS服务器映射
-├── data/                         # 数据文件
+│   ├── tld_whois_servers.yaml    # TLD WHOIS服务器映射
 │   └── rdap_bootstrap.json       # RDAP Bootstrap数据
 ├── main.go                       # 程序入口
 ├── go.mod

@@ -9,7 +9,7 @@ Public 3rd-party client API. Self-contained - does NOT depend on `internal/` pac
 | Client + Option pattern | `client.go` | `NewClient(opts...)`, functional options, `Logger` interface |
 | RDAP query | `rdap.go` | `queryRDAP()`, `parseRDAPResponse()`, 11 default TLD endpoints |
 | WHOIS query (standalone) | `whois.go` | `WHOISClient` struct, `WHOISOption` pattern (WS prefix) |
-| IANA fetchers | `bootstrap.go` | `FetchRDAPBootstrap`, `FetchTLDList`, `FetchWhoisServers` |
+| IANA fetchers | `bootstrap.go` | `DownloadRDAPConfig`, `FetchTLDList`, `FetchWhoisServers` |
 | Public model | `pkg/model/domain.go` | `DomainInfo`, `QueryProtocol`, `Error`, error codes |
 
 ## CONVENTIONS
@@ -24,7 +24,7 @@ Public 3rd-party client API. Self-contained - does NOT depend on `internal/` pac
 - **RDAP Bootstrap loading**: If `rdapBootstrapFile` is set via `WithRDAPBootstrapFile`, loads from local file first; falls back to URL fetch on failure
 - **Config download functions**: `DownloadRDAPBootstrap(destPath)` and `DownloadWHOISConfig(destPath, concurrency, progressCallback)` download configs to specified paths
 - **FetchWhoisServers concurrency**: Uses `sync.WaitGroup` + buffered channel semaphore + writes to `&results[idx]` (index-isolated, safe)
-- **Bootstrap fetch**: `FetchRDAPBootstrap` parses IANA `dns.json`; `FetchTLDList`/`FetchWhoisServer` scrape IANA HTML pages via regex
+- **Bootstrap fetch**: `DownloadRDAPConfig` parses IANA `dns.json`; `FetchTLDList`/`FetchWhoisServer` scrape IANA HTML pages via regex
 
 ## ANTI-PATTERNS
 
