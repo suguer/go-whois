@@ -50,47 +50,30 @@ type RDAPResponse struct {
 	} `json:"secureDNS"`
 }
 
-// loadRDAPBootstrap 加载 RDAP Bootstrap 数据
-// 优先从本地文件加载，其次从 URL 加载
-func (c *Client) loadRDAPBootstrap() {
-	defer c.readyOnce.Do(func() {
-		close(c.readyCh)
-	})
-
-	// 如果指定了本地文件，优先从文件加载
-	if c.options.rdapBootstrapFile != "" {
-		if err := c.loadRDAPFromFile(c.options.rdapBootstrapFile); err != nil {
-			c.logger.Warn("从本地文件加载 RDAP Bootstrap 失败", "path", c.options.rdapBootstrapFile, "error", err)
-		} else {
-			return
-		}
-	}
-
+// refreshRDAPFromNetwork 从网络异步刷新 RDAP Bootstrap 配置
+// 合并/覆盖已有配置，不影响客户端即时可用性
+func (c *Client) refreshRDAPFromNetwork() {
 	resp, err := c.httpClient.Get(c.options.rdapBootstrap)
 	if err != nil {
-		c.logger.Warn("加载 IANA RDAP Bootstrap 失败", "error", err)
-		c.loadEmbeddedRDAP()
+		c.logger.Warn("网络刷新 RDAP Bootstrap 失败，保留内嵌默认配置", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Warn("IANA RDAP Bootstrap 返回错误状态码", "status", resp.StatusCode)
-		c.loadEmbeddedRDAP()
 		return
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.logger.Warn("读取 RDAP Bootstrap 响应失败", "error", err)
-		c.loadEmbeddedRDAP()
 		return
 	}
 
 	var data IANABootstrapData
 	if err := json.Unmarshal(body, &data); err != nil {
 		c.logger.Warn("解析 RDAP Bootstrap JSON 失败", "error", err)
-		c.loadEmbeddedRDAP()
 		return
 	}
 
@@ -111,7 +94,7 @@ func (c *Client) loadRDAPBootstrap() {
 		}
 	}
 
-	c.logger.Info("成功加载 IANA RDAP Bootstrap", "count", len(c.rdapCache))
+	c.logger.Info("网络刷新 RDAP Bootstrap 成功", "count", len(c.rdapCache))
 }
 
 // loadEmbeddedRDAP 从内嵌的默认配置加载 RDAP 端点
@@ -211,6 +194,16 @@ func (c *Client) getRDAPEndpoint(tld string) (string, bool) {
 
 // queryRDAP 执行 RDAP 查询
 func (c *Client) queryRDAP(ctx context.Context, domain string) (*model.DomainInfo, error) {
+	// 等待 RDAP Bootstrap 加载完成
+	select {
+	case <-c.readyCh:
+	case <-ctx.Done():
+		return nil, &model.Error{
+			Code:    model.ErrCodeQueryTimeout,
+			Message: "等待 RDAP Bootstrap 加载超时",
+		}
+	}
+
 	// 提取 TLD
 	parts := strings.Split(domain, ".")
 	if len(parts) < 2 {

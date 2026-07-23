@@ -264,9 +264,19 @@ func NewClient(opts ...Option) *Client {
 		c.mu.Unlock()
 		c.readyOnce.Do(func() { close(c.readyCh) })
 		c.logger.Info("使用预加载的 RDAP 配置", "count", len(o.rdapConfig))
+	} else if o.rdapBootstrapFile != "" {
+		// 指定了本地文件，同步加载
+		if err := c.loadRDAPFromFile(o.rdapBootstrapFile); err != nil {
+			c.logger.Warn("从本地文件加载 RDAP Bootstrap 失败，使用内嵌默认配置", "path", o.rdapBootstrapFile, "error", err)
+			c.loadEmbeddedRDAP()
+		}
+		c.readyOnce.Do(func() { close(c.readyCh) })
 	} else {
-		// 异步加载 RDAP Bootstrap
-		go c.loadRDAPBootstrap()
+		// 同步加载内嵌默认配置，保证立即可用
+		c.loadEmbeddedRDAP()
+		c.readyOnce.Do(func() { close(c.readyCh) })
+		// 异步从网络更新（合并/覆盖已有配置）
+		go c.refreshRDAPFromNetwork()
 	}
 
 	return c

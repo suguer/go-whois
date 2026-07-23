@@ -215,7 +215,7 @@ func rdapBootstrapUsage() {
 	fmt.Println("=== RDAP Bootstrap 用法 ===")
 
 	// 从 IANA 获取 RDAP Bootstrap 数据
-	rdapEndpoints, err := whois.DownloadRDAPConfig("https://data.iana.org/rdap/dns.json")
+	rdapEndpoints, err := whois.DownloadRDAPConfig("https://data.iana.org/rdap/dns.json", "")
 	if err != nil {
 		log.Printf("获取 RDAP Bootstrap 失败: %v", err)
 		return

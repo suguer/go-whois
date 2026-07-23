@@ -21,8 +21,10 @@ type TLDInfo struct {
 }
 
 // DownloadRDAPConfig 从 IANA 获取 RDAP Bootstrap 数据
+// bootstrapURL: 数据源 URL，为空时使用 IANA 默认地址
+// destPath: 目标文件路径，非空时将原始 JSON 保存到该文件
 // 返回 TLD 到 RDAP 端点的映射
-func DownloadRDAPConfig(bootstrapURL string) (map[string]string, error) {
+func DownloadRDAPConfig(bootstrapURL string, destPath string) (map[string]string, error) {
 	if bootstrapURL == "" {
 		bootstrapURL = "https://data.iana.org/rdap/dns.json"
 	}
@@ -41,6 +43,17 @@ func DownloadRDAPConfig(bootstrapURL string) (map[string]string, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 限制 10MB
 	if err != nil {
 		return nil, fmt.Errorf("读取 RDAP Bootstrap 响应失败: %w", err)
+	}
+
+	// 保存到本地文件（在解析之前，确保下载成功即保存）
+	if destPath != "" {
+		dir := filepath.Dir(destPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("创建目录失败: %w", err)
+		}
+		if err := os.WriteFile(destPath, body, 0644); err != nil {
+			return nil, fmt.Errorf("写入 RDAP Bootstrap 文件失败: %w", err)
+		}
 	}
 
 	var data IANABootstrapData
