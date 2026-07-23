@@ -6,14 +6,34 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/suguer/go-whois/pkg/model"
 	"github.com/suguer/go-whois/pkg/validator"
-
 	"gopkg.in/yaml.v3"
 )
+
+// 域名不存在关键词匹配
+var domainNotFoundRegex = regexp.MustCompile(`(?i)(No match for|No matching record|The queried object does not exist:|DOMAIN NOT FOUND|No entries found|NOT FOUND|No Data Found|Status: AVAILABLE|Status: free|Domain Status: No Object Found)`)
+
+// 查询限制关键词匹配
+var queryLimitRegex = regexp.MustCompile(`(?i)(Queried interval is too short|Your access is too fast,please try again later|Query rate exceeded|please try again later|rate limit exceeded|Too many requests|Request denied|Query limit exceeded)`)
+
+// checkWHOISResponseError 检查 WHOIS 响应中的错误关键词
+// 返回错误类型和错误消息
+func checkWHOISResponseError(rawResponse string) (code string, message string) {
+	// 检查域名不存在
+	if domainNotFoundRegex.MatchString(rawResponse) {
+		return model.ErrCodeDomainNotFound, "域名未注册或不存在"
+	}
+	// 检查查询限制
+	if queryLimitRegex.MatchString(rawResponse) {
+		return model.ErrCodeQueryLimit, "查询频率受限，请稍后重试"
+	}
+	return "", ""
+}
 
 // TLDServerConfig 表示 TLD 服务器配置
 type TLDServerConfig struct {
@@ -31,27 +51,27 @@ type WHOISClient struct {
 	configFile string
 }
 
-// NewWHOISClient 创建新的 WHOIS 客户端
+// NewWHOISClient 创建 WHOIS 客户端
 func NewWHOISClient(opts ...WHOISOption) *WHOISClient {
-	client := &WHOISClient{
+	c := &WHOISClient{
 		servers:   make(map[string]string),
 		fallbacks: make(map[string][]string),
 		timeout:   10 * time.Second,
 		port:      43,
-		logger:    &defaultLogger{},
+		logger:    newDefaultLogger(),
 	}
 
 	// 应用选项
 	for _, opt := range opts {
-		opt(client)
+		opt(c)
 	}
 
 	// 如果没有自定义服务器配置，尝试加载默认配置文件
-	if len(client.servers) == 0 {
-		client.loadDefaultConfig()
+	if len(c.servers) == 0 {
+		c.loadDefaultConfig()
 	}
 
-	return client
+	return c
 }
 
 // WHOISOption 定义 WHOIS 客户端配置选项
@@ -193,7 +213,8 @@ func (c *WHOISClient) Query(ctx context.Context, domain string) (*model.DomainIn
 	rawResponse, err := c.queryServer(ctx, server, domain)
 	if err != nil {
 		// 尝试备用服务器
-		if fallbacks, ok := c.fallbacks[domain]; ok {
+		tld := c.extractTLD(domain)
+		if fallbacks, ok := c.fallbacks[tld]; ok {
 			for _, fallback := range fallbacks {
 				rawResponse, err = c.queryServer(ctx, fallback, domain)
 				if err == nil {
@@ -202,11 +223,26 @@ func (c *WHOISClient) Query(ctx context.Context, domain string) (*model.DomainIn
 			}
 		}
 		if err != nil {
+			// 区分超时和其他网络错误
+			code := model.ErrCodeProtocolError
+			message := "WHOIS 查询失败"
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				code = model.ErrCodeQueryTimeout
+				message = "WHOIS 查询超时"
+			}
 			return nil, &model.Error{
-				Code:    model.ErrCodeQueryTimeout,
-				Message: "WHOIS 查询失败",
+				Code:    code,
+				Message: message,
 				Details: err.Error(),
 			}
+		}
+	}
+
+	// 检查响应中的错误关键词
+	if errCode, errMsg := checkWHOISResponseError(rawResponse); errCode != "" {
+		return nil, &model.Error{
+			Code:    errCode,
+			Message: errMsg,
 		}
 	}
 
@@ -221,7 +257,7 @@ func (c *WHOISClient) Query(ctx context.Context, domain string) (*model.DomainIn
 
 	// 解析响应（简化版本，完整版本需要使用内部的 normalizer）
 	if err := c.parseResponse(result, rawResponse); err != nil {
-		c.logger.Warn("解析 WHOIS 响应失败: %v", err)
+		c.logger.Warn("解析 WHOIS 响应失败", "error", err)
 	}
 
 	return result, nil
@@ -259,9 +295,11 @@ func (c *WHOISClient) extractTLD(domain string) string {
 
 // queryServer 查询 WHOIS 服务器
 func (c *WHOISClient) queryServer(ctx context.Context, server, domain string) (string, error) {
-	// 建立 TCP 连接
-	addr := fmt.Sprintf("%s:%d", server, c.port)
-	conn, err := net.DialTimeout("tcp", addr, c.timeout)
+	// 建立 TCP 连接，支持 ctx 取消
+	dialer := &net.Dialer{
+		Timeout: c.timeout,
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", server, c.port))
 	if err != nil {
 		return "", fmt.Errorf("连接 WHOIS 服务器失败: %w", err)
 	}
@@ -283,6 +321,12 @@ func (c *WHOISClient) queryServer(ctx context.Context, server, domain string) (s
 	// 设置更大的缓冲区以处理大型 WHOIS 响应
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB
 	for scanner.Scan() {
+		// 检查 ctx 是否已取消
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
 		line := scanner.Text()
 		response.WriteString(line + "\n")
 	}

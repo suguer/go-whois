@@ -306,6 +306,17 @@ func (c *Client) BatchLookup(ctx context.Context, domains []string, maxConcurren
 
 // lookupWithProtocol 内部查询实现
 func (c *Client) lookupWithProtocol(ctx context.Context, domain string, protocol model.QueryProtocol) (*model.DomainInfo, error) {
+	// 检查客户端是否已关闭
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return nil, &model.Error{
+			Code:    model.ErrCodeInternalError,
+			Message: "客户端已关闭",
+		}
+	}
+	c.mu.RUnlock()
+
 	// 验证域名
 	if err := validateDomain(domain); err != nil {
 		return nil, &model.Error{
@@ -337,11 +348,18 @@ func (c *Client) lookupWithProtocol(ctx context.Context, domain string, protocol
 	case model.ProtocolWHOIS:
 		result, err = c.queryWHOIS(ctx, domain)
 	case model.ProtocolAuto:
-		// RDAP 优先
+		// RDAP 优先，仅在 5xx/超时/协议错误时回退到 WHOIS
 		result, err = c.queryRDAP(ctx, domain)
 		if err != nil {
-			c.logger.Warn("RDAP 查询失败，回退到 WHOIS", "domain", domain, "error", err)
-			result, err = c.queryWHOIS(ctx, domain)
+			// 检查是否应该回退到 WHOIS
+			if modelErr, ok := err.(*model.Error); ok {
+				switch modelErr.Code {
+				case model.ErrCodeQueryTimeout, model.ErrCodeProtocolError, model.ErrCodeServiceUnavailable:
+					c.logger.Warn("RDAP 查询失败，回退到 WHOIS", "domain", domain, "error", err)
+					result, err = c.queryWHOIS(ctx, domain)
+				}
+				// DOMAIN_NOT_FOUND 等其他错误直接返回
+			}
 		}
 	default:
 		return nil, &model.Error{
@@ -388,7 +406,7 @@ func (c *Client) ClearCache() {
 	c.logger.Info("缓存已清空")
 }
 
-// getFromCache 从缓存获取
+// getFromCache 从缓存获取（返回副本，避免共享指针）
 func (c *Client) getFromCache(key string) (*model.DomainInfo, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -402,7 +420,10 @@ func (c *Client) getFromCache(key string) (*model.DomainInfo, bool) {
 		return nil, false
 	}
 
-	return entry.data, true
+	// 返回浅拷贝，避免调用方修改缓存数据
+	data := *entry.data
+	data.DataSource = string(model.DataSourceCache)
+	return &data, true
 }
 
 // setCache 写入缓存
@@ -449,6 +470,10 @@ func (c *Client) queryWHOIS(ctx context.Context, domain string) (*model.DomainIn
 
 	result, err := c.whoisClient.Query(ctx, domain)
 	if err != nil {
+		// 如果已经是 *model.Error，直接返回（保留原始错误码）
+		if modelErr, ok := err.(*model.Error); ok {
+			return nil, modelErr
+		}
 		return nil, &model.Error{
 			Code:    model.ErrCodeProtocolError,
 			Message: "WHOIS 查询失败",
@@ -479,15 +504,20 @@ func normalizeDomain(domain string) string {
 // Close 清理客户端资源
 func (c *Client) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
+		c.mu.Unlock()
 		return nil
 	}
 	c.closed = true
+	c.mu.Unlock()
+
+	// 等待 RDAP Bootstrap 加载完成（防止 goroutine 泄漏）
+	<-c.readyCh
 
 	// 清空缓存
+	c.mu.Lock()
 	c.resultCache = make(map[string]*cacheEntry)
+	c.mu.Unlock()
 
 	// 关闭 HTTP 连接
 	c.httpClient.CloseIdleConnections()

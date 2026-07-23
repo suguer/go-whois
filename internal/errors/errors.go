@@ -13,6 +13,7 @@ const (
 	ErrCodeInvalidDomain     ErrorCode = "INVALID_DOMAIN"
 	ErrCodeDomainNotFound    ErrorCode = "DOMAIN_NOT_FOUND"
 	ErrCodeQueryTimeout      ErrorCode = "QUERY_TIMEOUT"
+	ErrCodeQueryLimit        ErrorCode = "QUERY_LIMIT"
 	ErrCodeProtocolError     ErrorCode = "PROTOCOL_ERROR"
 	ErrCodeRateLimited       ErrorCode = "RATE_LIMITED"
 	ErrCodeBatchSizeExceeded ErrorCode = "BATCH_SIZE_EXCEEDED"

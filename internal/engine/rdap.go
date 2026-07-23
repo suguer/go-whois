@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/suguer/go-whois/internal/config"
+	"github.com/suguer/go-whois/internal/errors"
 	"github.com/suguer/go-whois/internal/model"
 	"github.com/suguer/go-whois/pkg/validator"
 )
@@ -176,7 +178,7 @@ func (r *RDAP) IsAvailable() bool {
 func (r *RDAP) Query(ctx context.Context, domain string) (*model.DomainInfo, error) {
 	// 验证域名
 	if err := validator.ValidateDomain(domain); err != nil {
-		return nil, fmt.Errorf("域名验证失败: %w", err)
+		return nil, errors.NewInvalidDomainError(domain, err)
 	}
 
 	// 规范化域名
@@ -185,7 +187,13 @@ func (r *RDAP) Query(ctx context.Context, domain string) (*model.DomainInfo, err
 	// 获取 RDAP 端点
 	endpoint, err := r.getEndpoint(domain)
 	if err != nil {
-		return nil, fmt.Errorf("获取 RDAP 端点失败: %w", err)
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeProtocolError,
+			Message:    "获取 RDAP 端点失败",
+			Details:    fmt.Sprintf("TLD %s 没有配置 RDAP 端点", domain),
+			HTTPStatus: http.StatusBadGateway,
+			Err:        err,
+		}
 	}
 
 	// 构建请求 URL
@@ -194,7 +202,18 @@ func (r *RDAP) Query(ctx context.Context, domain string) (*model.DomainInfo, err
 	// 执行查询
 	rawData, err := r.doRequest(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("RDAP 查询失败: %w", err)
+		// 如果已经是AppError，直接返回
+		if appErr, ok := err.(*errors.AppError); ok {
+			return nil, appErr
+		}
+		// 否则包装为AppError
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeProtocolError,
+			Message:    "RDAP 查询失败",
+			Details:    fmt.Sprintf("查询域名 %s 失败", domain),
+			HTTPStatus: http.StatusBadGateway,
+			Err:        err,
+		}
 	}
 
 	// 使用标准化器解析
@@ -238,7 +257,13 @@ func (r *RDAP) doRequest(ctx context.Context, url string) ([]byte, error) {
 	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeInternalError,
+			Message:    "创建 RDAP 请求失败",
+			Details:    "无法创建 HTTP 请求",
+			HTTPStatus: http.StatusInternalServerError,
+			Err:        err,
+		}
 	}
 
 	// 设置 User-Agent
@@ -248,28 +273,69 @@ func (r *RDAP) doRequest(ctx context.Context, url string) ([]byte, error) {
 	// 执行请求
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("执行请求失败: %w", err)
+		// 区分超时和其他网络错误
+		code := errors.ErrCodeProtocolError
+		message := "RDAP 请求失败"
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			code = errors.ErrCodeQueryTimeout
+			message = "RDAP 请求超时"
+		}
+		return nil, &errors.AppError{
+			Code:       code,
+			Message:    message,
+			Details:    fmt.Sprintf("请求 URL: %s", url),
+			HTTPStatus: http.StatusBadGateway,
+			Err:        err,
+		}
 	}
 	defer resp.Body.Close()
 
 	// 检查状态码
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("域名未注册")
+		return nil, errors.NewDomainNotFoundError(extractDomainFromURL(url))
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("请求过于频繁")
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeQueryLimit,
+			Message:    "RDAP 查询频率受限",
+			Details:    fmt.Sprintf("状态码: %d", resp.StatusCode),
+			HTTPStatus: http.StatusTooManyRequests,
+		}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("请求失败，状态码: %d", resp.StatusCode)
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeProtocolError,
+			Message:    fmt.Sprintf("RDAP 查询失败，状态码: %d", resp.StatusCode),
+			HTTPStatus: http.StatusBadGateway,
+		}
 	}
 
 	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %w", err)
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeInternalError,
+			Message:    "读取 RDAP 响应失败",
+			HTTPStatus: http.StatusInternalServerError,
+			Err:        err,
+		}
 	}
 
 	return body, nil
+}
+
+// extractDomainFromURL 从 URL 中提取域名（辅助函数）
+func extractDomainFromURL(url string) string {
+	// 简单提取：找到 "domain/" 后面的部分
+	if idx := strings.Index(url, "domain/"); idx != -1 {
+		domain := url[idx+7:]
+		// 移除末尾的斜杠
+		if strings.HasSuffix(domain, "/") {
+			domain = domain[:len(domain)-1]
+		}
+		return domain
+	}
+	return ""
 }
 
 // RDAPResponse 表示 RDAP 响应

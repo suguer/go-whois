@@ -115,6 +115,7 @@ const (
 	ErrCodeInvalidDomain       = "INVALID_DOMAIN"
 	ErrCodeDomainNotFound      = "DOMAIN_NOT_FOUND"
 	ErrCodeQueryTimeout        = "QUERY_TIMEOUT"
+	ErrCodeQueryLimit          = "QUERY_LIMIT"
 	ErrCodeProtocolError       = "PROTOCOL_ERROR"
 	ErrCodeRateLimited         = "RATE_LIMITED"
 	ErrCodeInternalError       = "INTERNAL_ERROR"

@@ -157,10 +157,13 @@ func FetchWhoisServers(tlds []TLDInfo, concurrency int, progressCallback func(pr
 
 			mu.Lock()
 			progress++
-			if progressCallback != nil {
-				progressCallback(progress, total)
-			}
+			current := progress
 			mu.Unlock()
+
+			// 在锁外调用回调，避免阻塞其他 worker
+			if progressCallback != nil {
+				progressCallback(current, total)
+			}
 		}(i)
 	}
 

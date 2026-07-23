@@ -464,8 +464,9 @@ if err != nil {
 | 错误代码 | 说明 |
 |----------|------|
 | `INVALID_DOMAIN` | 域名格式无效 |
-| `DOMAIN_NOT_FOUND` | 域名未注册 |
+| `DOMAIN_NOT_FOUND` | 域名未注册或不存在 |
 | `QUERY_TIMEOUT` | 查询超时 |
+| `QUERY_LIMIT` | 查询频率受限，请稍后重试 |
 | `PROTOCOL_ERROR` | 协议错误 |
 | `UNSUPPORTED_PROTOCOL` | 不支持的协议 |
 | `RATE_LIMITED` | 请求频率超限 |

@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/suguer/go-whois/internal/cache"
 	"github.com/suguer/go-whois/internal/config"
 	"github.com/suguer/go-whois/internal/engine"
+	"github.com/suguer/go-whois/internal/errors"
 	"github.com/suguer/go-whois/internal/model"
 	"github.com/suguer/go-whois/pkg/validator"
 )
@@ -47,7 +49,17 @@ func (s *LookupServiceImpl) Lookup(ctx context.Context, req *engine.QueryRequest
 
 	// 验证域名
 	if err := validator.ValidateDomain(req.Domain); err != nil {
-		return nil, fmt.Errorf("域名验证失败: %w", err)
+		return nil, errors.NewInvalidDomainError(req.Domain, err)
+	}
+
+	// 验证协议参数
+	if req.Protocol == "" {
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeProtocolError,
+			Message:    "协议参数无效",
+			Details:    "protocol 参数不能为空，可选值: rdap, whois, auto",
+			HTTPStatus: http.StatusBadRequest,
+		}
 	}
 
 	// 规范化域名
@@ -66,14 +78,28 @@ func (s *LookupServiceImpl) Lookup(ctx context.Context, req *engine.QueryRequest
 	// 执行查询
 	result, err := s.executeQuery(ctx, req.Domain, protocol)
 	if err != nil {
-		// 如果是自动模式，尝试切换协议
-		if req.Protocol == engine.ProtocolAuto {
-			result, err = s.tryFallbackProtocol(ctx, req.Domain, protocol)
-			if err != nil {
-				return nil, err
+		// 检查是否是 AppError
+		if appErr, ok := err.(*errors.AppError); ok {
+			// 如果是自动模式，且错误是可恢复的（协议错误、超时、限流），尝试切换协议
+			if req.Protocol == engine.ProtocolAuto {
+				if appErr.Code == errors.ErrCodeProtocolError ||
+					appErr.Code == errors.ErrCodeQueryTimeout ||
+					appErr.Code == errors.ErrCodeQueryLimit {
+					result, err = s.tryFallbackProtocol(ctx, req.Domain, protocol)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					// 不可恢复的错误（如域名未找到），直接返回
+					return nil, appErr
+				}
+			} else {
+				// 用户指定了协议，直接返回错误
+				return nil, appErr
 			}
 		} else {
-			return nil, err
+			// 普通错误，包装为内部错误
+			return nil, errors.WrapInternalError(err)
 		}
 	}
 
@@ -132,7 +158,8 @@ func (s *LookupServiceImpl) tryFallbackProtocol(ctx context.Context, domain stri
 	// 尝试备用协议
 	result, err := s.executeQuery(ctx, domain, fallbackProtocol)
 	if err != nil {
-		return nil, fmt.Errorf("所有查询协议都失败，RDAP错误: %v, WHOIS错误: %v", err, err)
+		// 如果回退也失败了，直接返回回退的错误（保留原始错误类型）
+		return nil, err
 	}
 
 	// 标记使用了备用协议

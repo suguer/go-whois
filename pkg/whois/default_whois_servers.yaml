@@ -116,6 +116,7 @@ servers:
   ".cloud": "whois.nic.cloud"
   ".club": "whois.nic.club"
   ".clubmed": "whois.nic.clubmed"
+  ".cn": "whois.cnnic.cn"
   ".college": "whois.nic.college"
   ".cologne": "whois.ryce-rsp.com"
   ".com": "whois.verisign-grs.com"

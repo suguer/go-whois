@@ -3,8 +3,10 @@ package whois
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -38,6 +40,10 @@ type RDAPResponse struct {
 		Handle          string        `json:"handle"`
 		Roles           []string      `json:"roles"`
 		VCardArray      []interface{} `json:"vcardArray"`
+		PublicIDs       []struct {
+			Type       string `json:"type"`
+			Identifier string `json:"identifier"`
+		} `json:"publicIds"`
 	} `json:"entities"`
 	SecureDNS struct {
 		DelegationSigned bool `json:"delegationSigned"`
@@ -217,7 +223,9 @@ func (c *Client) queryRDAP(ctx context.Context, domain string) (*model.DomainInf
 		// 区分超时和其他网络错误
 		code := model.ErrCodeProtocolError
 		message := "RDAP 查询失败"
-		if ctx.Err() == context.DeadlineExceeded {
+		// 使用 net.Error 接口或 errors.Is 检查超时
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
 			code = model.ErrCodeQueryTimeout
 			message = "RDAP 查询超时"
 		}
@@ -311,11 +319,18 @@ func (c *Client) parseRDAPResponse(domain string, data []byte, duration int64) (
 		for _, role := range entity.Roles {
 			switch role {
 			case "registrar":
-				name, url, ianaID := parseRegistrarVCard(entity.VCardArray)
+				name, url, _ := parseRegistrarVCard(entity.VCardArray)
 				result.RegistrarName = name
 				result.RegistrarURL = url
-				result.RegistrarIANAID = ianaID
-				if entity.Handle != "" && result.RegistrarIANAID == "" {
+				// 优先从 publicIds 获取 IANA Registrar ID
+				for _, pid := range entity.PublicIDs {
+					if pid.Type == "IANA Registrar ID" {
+						result.RegistrarIANAID = pid.Identifier
+						break
+					}
+				}
+				// 如果 publicIds 没有，使用 Handle 作为备选
+				if result.RegistrarIANAID == "" && entity.Handle != "" {
 					result.RegistrarIANAID = entity.Handle
 				}
 			case "registrant":

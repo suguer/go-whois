@@ -5,16 +5,39 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/suguer/go-whois/internal/config"
+	"github.com/suguer/go-whois/internal/errors"
 	"github.com/suguer/go-whois/internal/model"
 	"github.com/suguer/go-whois/pkg/validator"
 
 	"gopkg.in/yaml.v3"
 )
+
+// 域名不存在关键词匹配
+var domainNotFoundRegex = regexp.MustCompile(`(?i)(No match for|No matching record|The queried object does not exist:|DOMAIN NOT FOUND|No entries found|NOT FOUND|No Data Found|Status: AVAILABLE|Status: free|Domain Status: No Object Found)`)
+
+// 查询限制关键词匹配
+var queryLimitRegex = regexp.MustCompile(`(?i)(Queried interval is too short|Your access is too fast,please try again later|Query rate exceeded|please try again later|rate limit exceeded|Too many requests|Request denied|Query limit exceeded)`)
+
+// checkWHOISResponseError 检查 WHOIS 响应中的错误关键词
+// 返回错误类型和错误消息
+func checkWHOISResponseError(rawResponse string) (code errors.ErrorCode, message string) {
+	// 检查域名不存在
+	if domainNotFoundRegex.MatchString(rawResponse) {
+		return errors.ErrCodeDomainNotFound, "域名未注册或不存在"
+	}
+	// 检查查询限制
+	if queryLimitRegex.MatchString(rawResponse) {
+		return errors.ErrCodeQueryLimit, "查询频率受限，请稍后重试"
+	}
+	return "", ""
+}
 
 // TLDServerConfig 表示 TLD 服务器配置
 type TLDServerConfig struct {
@@ -99,7 +122,7 @@ func (w *WHOIS) IsAvailable() bool {
 func (w *WHOIS) Query(ctx context.Context, domain string) (*model.DomainInfo, error) {
 	// 验证域名
 	if err := validator.ValidateDomain(domain); err != nil {
-		return nil, fmt.Errorf("域名验证失败: %w", err)
+		return nil, errors.NewInvalidDomainError(domain, err)
 	}
 
 	// 规范化域名
@@ -108,7 +131,12 @@ func (w *WHOIS) Query(ctx context.Context, domain string) (*model.DomainInfo, er
 	// 获取 WHOIS 服务器
 	server := w.getServer(domain)
 	if server == "" {
-		return nil, fmt.Errorf("未找到域名 %s 的 WHOIS 服务器", domain)
+		return nil, &errors.AppError{
+			Code:       errors.ErrCodeProtocolError,
+			Message:    "未找到 WHOIS 服务器",
+			Details:    fmt.Sprintf("域名 %s 没有配置 WHOIS 服务器", domain),
+			HTTPStatus: http.StatusBadGateway,
+		}
 	}
 
 	// 执行查询
@@ -124,7 +152,28 @@ func (w *WHOIS) Query(ctx context.Context, domain string) (*model.DomainInfo, er
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("WHOIS 查询失败: %w", err)
+			code := errors.ErrCodeProtocolError
+			message := "WHOIS 查询失败"
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				code = errors.ErrCodeQueryTimeout
+				message = "WHOIS 查询超时"
+			}
+			return nil, &errors.AppError{
+				Code:       code,
+				Message:    message,
+				Details:    err.Error(),
+				HTTPStatus: http.StatusBadGateway,
+				Err:        err,
+			}
+		}
+	}
+
+	// 检查响应中的错误关键词
+	if errCode, errMsg := checkWHOISResponseError(rawResponse); errCode != "" {
+		return nil, &errors.AppError{
+			Code:       errCode,
+			Message:    errMsg,
+			HTTPStatus: http.StatusNotFound,
 		}
 	}
 
