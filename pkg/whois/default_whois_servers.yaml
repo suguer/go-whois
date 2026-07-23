@@ -622,7 +622,6 @@ servers:
   ".ci": "whois.nic.ci"
   ".cl": "whois.nic.cl"
   ".cm": "whois.nic.cm"
-  ".cn": "whois.cnnic.cn"
   ".co": "whois.registry.co"
   ".cr": "whois.nic.cr"
   ".cv": "whois.nic.cv"

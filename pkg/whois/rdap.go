@@ -69,28 +69,28 @@ func (c *Client) loadRDAPBootstrap() {
 	resp, err := c.httpClient.Get(c.options.rdapBootstrap)
 	if err != nil {
 		c.logger.Warn("加载 IANA RDAP Bootstrap 失败", "error", err)
-		c.loadDefaultRDAP()
+		c.loadEmbeddedRDAP()
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		c.logger.Warn("IANA RDAP Bootstrap 返回错误状态码", "status", resp.StatusCode)
-		c.loadDefaultRDAP()
+		c.loadEmbeddedRDAP()
 		return
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.logger.Warn("读取 RDAP Bootstrap 响应失败", "error", err)
-		c.loadDefaultRDAP()
+		c.loadEmbeddedRDAP()
 		return
 	}
 
 	var data IANABootstrapData
 	if err := json.Unmarshal(body, &data); err != nil {
 		c.logger.Warn("解析 RDAP Bootstrap JSON 失败", "error", err)
-		c.loadDefaultRDAP()
+		c.loadEmbeddedRDAP()
 		return
 	}
 
@@ -112,6 +112,36 @@ func (c *Client) loadRDAPBootstrap() {
 	}
 
 	c.logger.Info("成功加载 IANA RDAP Bootstrap", "count", len(c.rdapCache))
+}
+
+// loadEmbeddedRDAP 从内嵌的默认配置加载 RDAP 端点
+// 用于第三方库在无法下载 IANA 数据时的回退方案
+func (c *Client) loadEmbeddedRDAP() {
+	var data IANABootstrapData
+	if err := json.Unmarshal(defaultRDAPBootstrap, &data); err != nil {
+		c.logger.Warn("解析内嵌 RDAP Bootstrap 失败，使用硬编码默认值", "error", err)
+		c.loadDefaultRDAP()
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, service := range data.Services {
+		if len(service) < 2 || len(service[0]) == 0 || len(service[1]) == 0 {
+			continue
+		}
+		tlds := service[0]
+		endpoint := service[1][0]
+		if !strings.HasSuffix(endpoint, "/") {
+			endpoint += "/"
+		}
+		for _, tld := range tlds {
+			c.rdapCache[tld] = endpoint
+		}
+	}
+
+	c.logger.Info("从内嵌配置加载 RDAP Bootstrap", "count", len(c.rdapCache))
 }
 
 // loadDefaultRDAP 加载默认 RDAP 端点

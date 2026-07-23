@@ -27,9 +27,12 @@ package whois
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,7 +105,9 @@ type options struct {
 	cacheTTL          time.Duration
 	rdapBootstrap     string
 	rdapBootstrapFile string
+	rdapConfig        map[string]string // 预加载的 RDAP 配置 (TLD -> endpoint)
 	whoisConfigFile   string
+	whoisConfig       map[string]string // 预加载的 WHOIS 配置 (TLD -> server)
 	userAgent         string
 	logger            Logger
 	includeRaw        bool
@@ -150,11 +155,27 @@ func WithRDAPBootstrapFile(path string) Option {
 	}
 }
 
+// WithRDAPConfig 直接设置 RDAP 配置 (TLD -> endpoint 映射)
+// 设置后跳过网络下载和文件加载，直接使用传入的配置
+func WithRDAPConfig(config map[string]string) Option {
+	return func(o *options) {
+		o.rdapConfig = config
+	}
+}
+
 // WithWHOISConfigFile 设置本地 WHOIS 服务器配置文件路径
 // 指定后将从该文件加载 TLD -> WHOIS 服务器映射
 func WithWHOISConfigFile(path string) Option {
 	return func(o *options) {
 		o.whoisConfigFile = path
+	}
+}
+
+// WithWHOISConfig 直接设置 WHOIS 服务器配置 (TLD -> server 映射)
+// 设置后跳过文件加载和 embed 回退，直接使用传入的配置
+func WithWHOISConfig(config map[string]string) Option {
+	return func(o *options) {
+		o.whoisConfig = config
 	}
 }
 
@@ -229,10 +250,24 @@ func NewClient(opts ...Option) *Client {
 	if o.whoisConfigFile != "" {
 		whoisOpts = append(whoisOpts, WithWSConfigFile(o.whoisConfigFile))
 	}
+	if o.whoisConfig != nil {
+		whoisOpts = append(whoisOpts, WithWSServers(o.whoisConfig))
+	}
 	c.whoisClient = NewWHOISClient(whoisOpts...)
 
-	// 异步加载 RDAP Bootstrap
-	go c.loadRDAPBootstrap()
+	// 如果直接传入了 RDAP 配置，使用它并跳过异步下载
+	if o.rdapConfig != nil {
+		c.mu.Lock()
+		for k, v := range o.rdapConfig {
+			c.rdapCache[k] = v
+		}
+		c.mu.Unlock()
+		c.readyOnce.Do(func() { close(c.readyCh) })
+		c.logger.Info("使用预加载的 RDAP 配置", "count", len(o.rdapConfig))
+	} else {
+		// 异步加载 RDAP Bootstrap
+		go c.loadRDAPBootstrap()
+	}
 
 	return c
 }
@@ -499,6 +534,104 @@ func validateDomain(domain string) error {
 // normalizeDomain 规范化域名
 func normalizeDomain(domain string) string {
 	return validator.NormalizeDomain(domain)
+}
+
+// LoadRDAPConfig 运行时加载 RDAP 配置 (TLD -> endpoint 映射)
+// 会与已有配置合并，相同 TLD 覆盖旧值
+func (c *Client) LoadRDAPConfig(config map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for k, v := range config {
+		c.rdapCache[k] = v
+	}
+
+	// 确保 readyCh 已关闭
+	c.readyOnce.Do(func() { close(c.readyCh) })
+	c.logger.Info("运行时加载 RDAP 配置", "count", len(config))
+}
+
+// LoadRDAPConfigFromBytes 从 JSON 字节数据加载 RDAP Bootstrap 配置
+// JSON 格式须符合 IANA RDAP Bootstrap 规范
+func (c *Client) LoadRDAPConfigFromBytes(data []byte) error {
+	var bootstrapData IANABootstrapData
+	if err := json.Unmarshal(data, &bootstrapData); err != nil {
+		return fmt.Errorf("解析 RDAP Bootstrap JSON 失败: %w", err)
+	}
+
+	config := make(map[string]string)
+	for _, service := range bootstrapData.Services {
+		if len(service) < 2 || len(service[0]) == 0 || len(service[1]) == 0 {
+			continue
+		}
+		tlds := service[0]
+		endpoint := service[1][0]
+		if !strings.HasSuffix(endpoint, "/") {
+			endpoint += "/"
+		}
+		for _, tld := range tlds {
+			config[tld] = endpoint
+		}
+	}
+
+	c.LoadRDAPConfig(config)
+	return nil
+}
+
+// LoadRDAPConfigFromFile 从本地 JSON 文件加载 RDAP Bootstrap 配置
+func (c *Client) LoadRDAPConfigFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取 RDAP Bootstrap 文件失败: %w", err)
+	}
+	return c.LoadRDAPConfigFromBytes(data)
+}
+
+// LoadWHOISConfig 运行时加载 WHOIS 服务器配置 (TLD -> server 映射)
+// 会与已有配置合并，相同 TLD 覆盖旧值
+func (c *Client) LoadWHOISConfig(config map[string]string) {
+	if c.whoisClient != nil {
+		c.whoisClient.LoadServers(config)
+	}
+	c.logger.Info("运行时加载 WHOIS 配置", "count", len(config))
+}
+
+// LoadWHOISConfigFromBytes 从 YAML 字节数据加载 WHOIS 服务器配置
+// YAML 格式须包含 servers 字段
+func (c *Client) LoadWHOISConfigFromBytes(data []byte) error {
+	if c.whoisClient == nil {
+		return fmt.Errorf("WHOIS 客户端未初始化")
+	}
+	return c.whoisClient.LoadConfigFromBytes(data)
+}
+
+// LoadWHOISConfigFromFile 从本地 YAML 文件加载 WHOIS 服务器配置
+func (c *Client) LoadWHOISConfigFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取 WHOIS 配置文件失败: %w", err)
+	}
+	return c.LoadWHOISConfigFromBytes(data)
+}
+
+// GetRDAPConfig 获取当前 RDAP 配置的副本 (TLD -> endpoint 映射)
+func (c *Client) GetRDAPConfig() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result := make(map[string]string, len(c.rdapCache))
+	for k, v := range c.rdapCache {
+		result[k] = v
+	}
+	return result
+}
+
+// GetWHOISConfig 获取当前 WHOIS 服务器配置的副本 (TLD -> server 映射)
+func (c *Client) GetWHOISConfig() map[string]string {
+	if c.whoisClient == nil {
+		return nil
+	}
+	return c.whoisClient.GetServers()
 }
 
 // Close 清理客户端资源

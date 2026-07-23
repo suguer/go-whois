@@ -151,7 +151,7 @@ func (c *WHOISClient) loadDefaultConfig() {
 	}
 
 	// 最后使用内嵌的默认配置
-	c.loadConfigFromBytes(defaultWHOISConfig)
+	c.LoadConfigFromBytes(defaultWHOISConfig)
 }
 
 // loadConfigFromFile 从指定文件加载配置
@@ -161,11 +161,12 @@ func (c *WHOISClient) loadConfigFromFile(path string) error {
 		return err
 	}
 
-	return c.loadConfigFromBytes(data)
+	return c.LoadConfigFromBytes(data)
 }
 
-// loadConfigFromBytes 从字节数据加载配置
-func (c *WHOISClient) loadConfigFromBytes(data []byte) error {
+// LoadConfigFromBytes 从字节数据加载 WHOIS 服务器配置 (公开方法)
+// YAML 格式须包含 servers 字段，可选 fallback_servers 字段
+func (c *WHOISClient) LoadConfigFromBytes(data []byte) error {
 	var tldConfig TLDServerConfig
 	if err := yaml.Unmarshal(data, &tldConfig); err != nil {
 		c.logger.Warn("解析 TLD 配置失败", "error", err)
@@ -184,6 +185,24 @@ func (c *WHOISClient) loadConfigFromBytes(data []byte) error {
 
 	c.logger.Info("已加载 TLD 服务器配置", "count", len(c.servers))
 	return nil
+}
+
+// LoadServers 运行时加载 WHOIS 服务器映射 (TLD -> server)
+// 会与已有配置合并，相同 TLD 覆盖旧值
+func (c *WHOISClient) LoadServers(config map[string]string) {
+	for k, v := range config {
+		c.servers[k] = v
+	}
+	c.logger.Info("运行时加载 WHOIS 服务器配置", "count", len(config))
+}
+
+// GetServers 获取当前 WHOIS 服务器配置的副本 (TLD -> server 映射)
+func (c *WHOISClient) GetServers() map[string]string {
+	result := make(map[string]string, len(c.servers))
+	for k, v := range c.servers {
+		result[k] = v
+	}
+	return result
 }
 
 // Query 执行 WHOIS 查询
